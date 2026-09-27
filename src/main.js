@@ -201,7 +201,7 @@ class Player{
   const wasGrounded=this.onGround;const beforeY=this.pos.y;this.moveAxis("y",this.vel.y*dt);
   if(!this.onGround&&!wasGrounded)this.airTime+=dt;
   if(this.onGround&&this.airTime>0){if(this.fallDistance>3)this.damage(Math.floor(this.fallDistance-3),"fall");this.airTime=0;this.fallDistance=0}
-  if(!this.onGround&&this.vel.y<0)this.fallDistance=Math.max(this.fallDistance,beforeY-this.pos.y);
+  if(!this.onGround&&this.vel.y<0)this.fallDistance+=Math.max(0,beforeY-this.pos.y);
   this.updateSurvival(dt);
   if(this.pos.y<-10)this.spawn();
   camera.position.copy(this.pos).add(new THREE.Vector3(0,1.62,0));camera.rotation.order="YXZ";camera.rotation.y=this.yaw;camera.rotation.x=this.pitch;
