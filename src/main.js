@@ -134,6 +134,6 @@ addEventListener("keydown",e=>{keys[e.code]=true;if(e.code.startsWith("Digit")){
 addEventListener("keyup",e=>keys[e.code]=false);
 function rendererPointer(){document.addEventListener("mousemove",e=>{if(document.pointerLockElement!==renderer.domElement||inventoryOpen)return;player.yaw-=e.movementX*.0022;player.pitch-=e.movementY*.0022;player.pitch=Math.max(-1.5,Math.min(1.5,player.pitch))});renderer?.domElement?.addEventListener("mousedown",e=>{if(paused)return;if(e.button===0)breakBlock();if(e.button===2)placeBlock()});renderer?.domElement?.addEventListener("contextmenu",e=>e.preventDefault())}
 document.getElementById("play").onclick=start;
-document.getElementById("newWorld").onclick=()=>{seed=Math.floor(Math.random()*2**31);localStorage.removeItem("voxel-player");location.reload()};
+document.getElementById("newWorld").onclick=()=>{seed=Math.floor(Math.random()*2**31);localStorage.removeItem("voxel-player");localStorage.removeItem("voxel-modified");location.reload()};
 init();
 rendererPointer();
