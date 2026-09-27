@@ -176,7 +176,7 @@ function streamWorld(){
 }
 
 class Player{
- constructor(){this.pos=new THREE.Vector3(0,40,0);this.vel=new THREE.Vector3();this.yaw=0;this.pitch=0;this.onGround=false;this.health=20;this.maxHealth=20;this.hunger=20;this.maxHunger=20;this.saturation=5;this.fallStart=null;this.lastDamage=0}
+ constructor(){this.pos=new THREE.Vector3(0,40,0);this.vel=new THREE.Vector3();this.yaw=0;this.pitch=0;this.onGround=false;this.health=20;this.maxHealth=20;this.hunger=20;this.maxHunger=20;this.saturation=5;this.fallStart=null;this.fallDistance=0;this.lastDamage=0;this.airTime=0;
  damage(amount,reason="unknown"){if(performance.now()/1000-this.lastDamage<.45)return;this.lastDamage=performance.now()/1000;this.health=Math.max(0,this.health-amount);if(this.health<=0)this.die()}
  heal(amount){this.health=Math.min(this.maxHealth,this.health+amount)}
  eat(itemId){const food=ITEMS[itemId]?.food;if(!food)return false;if(this.hunger>=this.maxHunger)return false;this.hunger=Math.min(this.maxHunger,this.hunger+food);this.saturation=Math.min(this.hunger,this.saturation+food*.5);removeItem(itemId,1);saveWorld();return true}
@@ -186,6 +186,9 @@ class Player{
   this.hunger=Math.max(0,this.hunger-dt/90);
   if(this.hunger<=0)this.damage(dt>0?1*dt/2:0,"starvation");
   if(this.hunger>=18&&this.health<this.maxHealth)this.heal(dt*.8);
+  const bx=Math.floor(this.pos.x),by=Math.floor(this.pos.y+1.5),bz=Math.floor(this.pos.z);
+  if(getBlock(bx,by,bz)===15){this.airTime=0;this.fallDistance=0}
+  if(getBlock(bx,by,bz)===15&&Math.random()<dt*.35)this.damage(1,"drowning");
   if(this.pos.y<0)this.damage(dt*4,"void");
  }
 
@@ -195,8 +198,10 @@ class Player{
   const speed=(keys.ShiftLeft||keys.ShiftRight)?CFG.SPRINT:CFG.WALK;dir.applyAxisAngle(new THREE.Vector3(0,1,0),this.yaw);this.vel.x=dir.x*speed;this.vel.z=dir.z*speed;
   this.vel.y-=CFG.GRAVITY*dt;if(this.onGround&&keys.Space){this.vel.y=CFG.JUMP;this.onGround=false}
   this.moveAxis("x",this.vel.x*dt);this.moveAxis("z",this.vel.z*dt);
-  const beforeY=this.pos.y;this.moveAxis("y",this.vel.y*dt);
-  if(this.onGround&&beforeY-this.pos.y>3)this.damage(Math.max(0,Math.floor((beforeY-this.pos.y)-3)),"fall");
+  const wasGrounded=this.onGround;const beforeY=this.pos.y;this.moveAxis("y",this.vel.y*dt);
+  if(!this.onGround&&!wasGrounded)this.airTime+=dt;
+  if(this.onGround&&this.airTime>0){if(this.fallDistance>3)this.damage(Math.floor(this.fallDistance-3),"fall");this.airTime=0;this.fallDistance=0}
+  if(!this.onGround&&this.vel.y<0)this.fallDistance=Math.max(this.fallDistance,beforeY-this.pos.y);
   this.updateSurvival(dt);
   if(this.pos.y<-10)this.spawn();
   camera.position.copy(this.pos).add(new THREE.Vector3(0,1.62,0));camera.rotation.order="YXZ";camera.rotation.y=this.yaw;camera.rotation.x=this.pitch;
