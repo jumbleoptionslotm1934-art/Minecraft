@@ -3,23 +3,23 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.m
 const CFG={CHUNK:16,HEIGHT:80,VIEW:5,SEA:26,GRAVITY:28,JUMP:9.5,WALK:5.2,SPRINT:7.5};
 const BLOCKS={
   0:{name:"Air",solid:false},
-  1:{name:"Grass",solid:true,color:"#62a83f",top:"#78bf4a",bottom:"#74502e"},
-  2:{name:"Dirt",solid:true,color:"#79502f"},
-  3:{name:"Stone",solid:true,color:"#808080"},
-  4:{name:"Sand",solid:true,color:"#d6c27a"},
-  5:{name:"Wood",solid:true,color:"#77512f"},
-  6:{name:"Leaves",solid:true,color:"#397b38",transparent:true},
-  7:{name:"Planks",solid:true,color:"#b18452"},
-  8:{name:"Glass",solid:true,color:"#a7d7dc",transparent:true},
-  9:{name:"Glowstone",solid:true,color:"#e3c35b",light:12},
-  10:{name:"Coal Ore",solid:true,color:"#424242"},
-  11:{name:"Iron Ore",solid:true,color:"#9a8878"},
-  12:{name:"Copper Ore",solid:true,color:"#a86f52"},
-  13:{name:"Gold Ore",solid:true,color:"#d9b62d"},
-  14:{name:"Crystal Ore",solid:true,color:"#5cc7e8"},
+  1:{name:"Grass",solid:true,color:"#62a83f",top:"#78bf4a",bottom:"#74502e",hardness:.6},
+  2:{name:"Dirt",solid:true,color:"#79502f",hardness:.5},
+  3:{name:"Stone",solid:true,color:"#808080",hardness:3},
+  4:{name:"Sand",solid:true,color:"#d6c27a",hardness:.5},
+  5:{name:"Wood",solid:true,color:"#77512f",hardness:2},
+  6:{name:"Leaves",solid:true,color:"#397b38",transparent:true,hardness:.2},
+  7:{name:"Planks",solid:true,color:"#b18452",hardness:2},
+  8:{name:"Glass",solid:true,color:"#a7d7dc",transparent:true,hardness:.3},
+  9:{name:"Glowstone",solid:true,color:"#e3c35b",light:12,hardness:.3},
+  10:{name:"Coal Ore",solid:true,color:"#424242",hardness:3},
+  11:{name:"Iron Ore",solid:true,color:"#9a8878",hardness:3},
+  12:{name:"Copper Ore",solid:true,color:"#a86f52",hardness:3},
+  13:{name:"Gold Ore",solid:true,color:"#d9b62d",hardness:3},
+  14:{name:"Crystal Ore",solid:true,color:"#5cc7e8",hardness:4},
   15:{name:"Water",solid:false,color:"#3d9bd1",transparent:true},
-  16:{name:"Cactus",solid:true,color:"#3d8b45"},
-  17:{name:"Wildflower",solid:true,color:"#d96aa9" }
+  16:{name:"Cactus",solid:true,color:"#3d8b45",hardness:.4},
+  17:{name:"Wildflower",solid:true,color:"#d96aa9",hardness:.1 }
 };
 const HOT=[1,2,3,4,5,7,6,8,9];
 const ITEMS={
@@ -202,7 +202,9 @@ function miningTime(blockId){
  const b=BLOCKS[blockId];if(!b)return 1;
  const t=selectedTool(),tool=ITEMS[t?.id];
  let speed=1;
- if(tool?.tool==="pickaxe"&&[3,10,11,12,13,14].includes(blockId))speed=1+tool.tier*2.2;
+ const pickBlocks=[3,10,11,12,13,14],axeBlocks=[5,7,16],handBlocks=[1,2,4,6,8,9,17];
+ if(pickBlocks.includes(blockId)&&!tool?.tool){speed=.45}
+ if(tool?.tool==="pickaxe"&&pickBlocks.includes(blockId))speed=1+tool.tier*2.2;
  else if(tool?.tool==="axe"&&[5,7,16].includes(blockId))speed=1+tool.tier*2;
  else if(tool?.tool==="shovel"&&[2,4].includes(blockId))speed=1+tool.tier*2;
  return Math.max(.12,b.hardness?b.hardness/speed:.65/speed);
