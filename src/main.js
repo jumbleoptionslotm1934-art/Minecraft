@@ -19,7 +19,10 @@ const BLOCKS={
   14:{name:"Crystal Ore",solid:true,color:"#5cc7e8",hardness:4},
   15:{name:"Water",solid:false,color:"#3d9bd1",transparent:true},
   16:{name:"Cactus",solid:true,color:"#3d8b45",hardness:.4},
-  17:{name:"Wildflower",solid:true,color:"#d96aa9",hardness:.1 }
+  17:{name:"Wildflower",solid:true,color:"#d96aa9",hardness:.1 },
+  18:{name:"Apple",solid:false,color:"#d83a32"},
+  19:{name:"Bread",solid:false,color:"#d6a15a"},
+  20:{name:"Cooked Meat",solid:false,color:"#9a4b2d"}
 };
 const HOT=[1,2,3,4,5,7,6,8,9];
 const ITEMS={
@@ -34,7 +37,10 @@ const ITEMS={
   103:{name:"Iron Pickaxe",tool:"pickaxe",tier:3,durability:250,max:1},
   104:{name:"Crystal Pickaxe",tool:"pickaxe",tier:4,durability:900,max:1},
   111:{name:"Wooden Axe",tool:"axe",tier:1,durability:59,max:1},
-  121:{name:"Wooden Sword",tool:"sword",tier:1,durability:59,max:1}
+  121:{name:"Wooden Sword",tool:"sword",tier:1,durability:59,max:1},
+  18:{name:"Apple",food:4,max:16},
+  19:{name:"Bread",food:6,max:64},
+  20:{name:"Cooked Meat",food:8,max:64}
 };
 const RECIPES=[
  {name:"Planks x4",out:7,count:4,need:[[5,1]]},
@@ -48,6 +54,7 @@ const RECIPES=[
 ];
 let scene,camera,renderer,clock,world,player,keys={},selected=0,paused=true,inventoryOpen=false;
 let materials={},chunkMeshes=new Map(),chunks=new Map(),dirty=new Set(),modified=new Map(),seed=133742;
+let worldTime=0, weather="clear", weatherTimer=0;
 let inventory=Array.from({length:36},()=>null), mining=false, miningTarget=null, miningProgress=0;
 const saved=localStorage.getItem("voxel-seed"); if(saved) seed=+saved;
 
@@ -169,13 +176,28 @@ function streamWorld(){
 }
 
 class Player{
- constructor(){this.pos=new THREE.Vector3(0,40,0);this.vel=new THREE.Vector3();this.yaw=0;this.pitch=0;this.onGround=false;this.health=20}
+ constructor(){this.pos=new THREE.Vector3(0,40,0);this.vel=new THREE.Vector3();this.yaw=0;this.pitch=0;this.onGround=false;this.health=20;this.maxHealth=20;this.hunger=20;this.maxHunger=20;this.saturation=5;this.fallStart=null;this.lastDamage=0}
+ damage(amount,reason="unknown"){if(performance.now()/1000-this.lastDamage<.45)return;this.lastDamage=performance.now()/1000;this.health=Math.max(0,this.health-amount);if(this.health<=0)this.die()}
+ heal(amount){this.health=Math.min(this.maxHealth,this.health+amount)}
+ eat(itemId){const food=ITEMS[itemId]?.food;if(!food)return false;if(this.hunger>=this.maxHunger)return false;this.hunger=Math.min(this.maxHunger,this.hunger+food);this.saturation=Math.min(this.hunger,this.saturation+food*.5);removeItem(itemId,1);saveWorld();return true}
+ die(){this.health=this.maxHealth;this.hunger=this.maxHunger;this.saturation=5;this.vel.set(0,0,0);modified=new Map();chunks=new Map();for(const m of chunkMeshes.values()){scene.remove(m);m.geometry.dispose()}chunkMeshes.clear();player.spawn();inventory=Array.from({length:36},()=>null);addItem(1,16);saveWorld()}
+ updateSurvival(dt){
+  this.lastDamage=Math.max(0,this.lastDamage-dt);
+  this.hunger=Math.max(0,this.hunger-dt/90);
+  if(this.hunger<=0)this.damage(dt>0?1*dt/2:0,"starvation");
+  if(this.hunger>=18&&this.health<this.maxHealth)this.heal(dt*.8);
+  if(this.pos.y<0)this.damage(dt*4,"void");
+ }
+
  spawn(){let y=CFG.HEIGHT-1;while(y>1&&getBlock(0,y,0)===0)y--;this.pos.set(.5,y+1.01,.5)}
  update(dt){
   const dir=new THREE.Vector3((keys.KeyD?1:0)-(keys.KeyA?1:0),0,(keys.KeyS?1:0)-(keys.KeyW?1:0));if(dir.lengthSq())dir.normalize();
   const speed=(keys.ShiftLeft||keys.ShiftRight)?CFG.SPRINT:CFG.WALK;dir.applyAxisAngle(new THREE.Vector3(0,1,0),this.yaw);this.vel.x=dir.x*speed;this.vel.z=dir.z*speed;
   this.vel.y-=CFG.GRAVITY*dt;if(this.onGround&&keys.Space){this.vel.y=CFG.JUMP;this.onGround=false}
-  this.moveAxis("x",this.vel.x*dt);this.moveAxis("z",this.vel.z*dt);this.moveAxis("y",this.vel.y*dt);
+  this.moveAxis("x",this.vel.x*dt);this.moveAxis("z",this.vel.z*dt);
+  const beforeY=this.pos.y;this.moveAxis("y",this.vel.y*dt);
+  if(this.onGround&&beforeY-this.pos.y>3)this.damage(Math.max(0,Math.floor((beforeY-this.pos.y)-3)),"fall");
+  this.updateSurvival(dt);
   if(this.pos.y<-10)this.spawn();
   camera.position.copy(this.pos).add(new THREE.Vector3(0,1.62,0));camera.rotation.order="YXZ";camera.rotation.y=this.yaw;camera.rotation.x=this.pitch;
  }
@@ -226,6 +248,7 @@ function updateMining(dt){
  if(miningProgress>=1){finishMining(hit);miningTarget=null;miningProgress=0}
 }
 function placeBlock(){
+ const selected=inventory[window.__selectedSlot||0];if(selected&&ITEMS[selected.id]?.food){player.eat(selected.id);return}
  const hit=raycast();if(!hit||!hit.previous)return;
  const p=hit.previous,item=inventory[selected];const blockId=item&&ITEMS[item.id]?.block;
  if(!blockId||collides(new THREE.Vector3(p.x+.5,p.y,p.z+.5)))return;
@@ -241,9 +264,18 @@ function countItem(id){return inventory.reduce((n,x)=>n+(x?.id===id?x.count:0),0
 function canCraft(r){return r.need.every(([id,n])=>countItem(id)>=n)}
 function craft(r){if(!canCraft(r))return false;for(const [id,n] of r.need)removeItem(id,n);return addItem(r.out,r.count)}
 
-function saveWorld(){localStorage.setItem("voxel-seed",String(seed));localStorage.setItem("voxel-player",JSON.stringify({x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch}));localStorage.setItem("voxel-modified",JSON.stringify([...modified]));localStorage.setItem("voxel-inventory",JSON.stringify(inventory))}
-function loadWorld(){try{const p=JSON.parse(localStorage.getItem("voxel-player"));if(p)Object.assign(player.pos,{x:p.x,y:p.y,z:p.z});const m=JSON.parse(localStorage.getItem("voxel-modified")||"[]");modified=new Map(m);const inv=JSON.parse(localStorage.getItem("voxel-inventory")||"null");if(Array.isArray(inv)&&inv.length===36)inventory=inv}catch{}}
+function saveWorld(){localStorage.setItem("voxel-seed",String(seed));localStorage.setItem("voxel-player",JSON.stringify({x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch,health:player.health,hunger:player.hunger,saturation:player.saturation,worldTime}));localStorage.setItem("voxel-modified",JSON.stringify([...modified]));localStorage.setItem("voxel-inventory",JSON.stringify(inventory))}
+function loadWorld(){try{const p=JSON.parse(localStorage.getItem("voxel-player"));if(p){Object.assign(player.pos,{x:p.x,y:p.y,z:p.z});player.health=p.health??20;player.hunger=p.hunger??20;player.saturation=p.saturation??5;worldTime=p.worldTime??0}const m=JSON.parse(localStorage.getItem("voxel-modified")||"[]");modified=new Map(m);const inv=JSON.parse(localStorage.getItem("voxel-inventory")||"null");if(Array.isArray(inv)&&inv.length===36)inventory=inv}catch{}}
 
+function updateEnvironment(dt){
+ worldTime=(worldTime+dt)%1200;weatherTimer-=dt;
+ if(weatherTimer<=0){weatherTimer=90+Math.random()*180;weather=Math.random()<.18?"rain":"clear"}
+ const phase=(worldTime/1200)*Math.PI*2, daylight=Math.max(.08,Math.sin(phase-Math.PI/2)*.5+.5);
+ scene.background.lerpColors(new THREE.Color("#10203d"),new THREE.Color("#7db9ed"),daylight);
+ scene.fog.color.copy(scene.background);
+ const sun=scene.children.find(o=>o.isDirectionalLight);if(sun){sun.intensity=.25+daylight*2.1;sun.position.set(Math.cos(phase)*100,20+daylight*120,Math.sin(phase)*100)}
+ if(weather==="rain"){scene.fog.near=30;scene.fog.far=115}else{scene.fog.near=45;scene.fog.far=145}
+}
 function init(){
  scene=new THREE.Scene();scene.background=new THREE.Color("#7db9ed");scene.fog=new THREE.Fog("#7db9ed",45,145);
  camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,250);
@@ -251,16 +283,16 @@ function init(){
  const amb=new THREE.HemisphereLight("#dceeff","#4c6b45",1.8);scene.add(amb);const sun=new THREE.DirectionalLight("#fff3d1",2.2);sun.position.set(80,120,40);sun.castShadow=true;scene.add(sun);
  materials.voxel=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
  player=new Player();world={};loadWorld();
- if(!localStorage.getItem("voxel-player")){player.spawn();addItem(1,32);addItem(2,32);addItem(3,32);addItem(5,16);addItem(7,16);addItem(101,1);addItem(121,1);saveWorld()}
+ if(!localStorage.getItem("voxel-player")){player.spawn();addItem(1,32);addItem(2,32);addItem(3,32);addItem(5,16);addItem(7,16);addItem(18,4);addItem(19,4);addItem(101,1);addItem(121,1);saveWorld()}
  renderHotbar();renderInventory();ensureWorld();rebuildDirty();
  clock=new THREE.Clock();animate();
 }
-function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();updateMining(dt);rebuildDirty()}const biome=biomeAt(Math.floor(player.pos.x),Math.floor(player.pos.z));
- document.getElementById("status").textContent='Seed '+seed+' · '+Math.floor(player.pos.x)+', '+Math.floor(player.pos.y)+', '+Math.floor(player.pos.z)+' · '+biome+' · '+(player.onGround?"Grounded":"Airborne");renderer.render(scene,camera)}
+function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();updateMining(dt);updateEnvironment(dt);rebuildDirty();if(Math.random()<dt*.02)saveWorld()}const biome=biomeAt(Math.floor(player.pos.x),Math.floor(player.pos.z));
+ document.getElementById("status").textContent='❤ '+Math.ceil(player.health)+' / '+player.maxHealth+' · Food '+Math.ceil(player.hunger)+' / '+player.maxHunger+' · '+weather+' · Seed '+seed+' · '+Math.floor(player.pos.x)+', '+Math.floor(player.pos.y)+', '+Math.floor(player.pos.z)+' · '+biome+' · '+(player.onGround?"Grounded":"Airborne");renderer.render(scene,camera)}
 function start(){paused=false;document.getElementById("menu").classList.add("hidden");renderer.domElement.requestPointerLock()}
 function toggleInventory(){inventoryOpen=!inventoryOpen;document.getElementById("inventory").classList.toggle("hidden",!inventoryOpen);if(inventoryOpen)document.exitPointerLock();else renderer.domElement.requestPointerLock()}
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
-addEventListener("keydown",e=>{keys[e.code]=true;if(e.code.startsWith("Digit")){const n=+e.code.slice(5)-1;if(n>=0&&n<9){selected=n;renderHotbar()}}if(e.code==="KeyE"&&!e.repeat)toggleInventory();if(e.code==="Escape"){inventoryOpen=false;document.getElementById("inventory").classList.add("hidden");paused=true;document.getElementById("menu").classList.remove("hidden")}})
+addEventListener("keydown",e=>{keys[e.code]=true;if(e.code.startsWith("Digit")){const n=+e.code.slice(5)-1;if(n>=0&&n<9){selected=n;window.__selectedSlot=n;renderHotbar()}}if(e.code==="KeyE"&&!e.repeat)toggleInventory();if(e.code==="Escape"){inventoryOpen=false;document.getElementById("inventory").classList.add("hidden");paused=true;document.getElementById("menu").classList.remove("hidden")}})
 addEventListener("keyup",e=>keys[e.code]=false);
 function rendererPointer(){document.addEventListener("mousemove",e=>{if(document.pointerLockElement!==renderer.domElement||inventoryOpen)return;player.yaw-=e.movementX*.0022;player.pitch-=e.movementY*.0022;player.pitch=Math.max(-1.5,Math.min(1.5,player.pitch))});renderer?.domElement?.addEventListener("mousedown",e=>{if(paused)return;if(e.button===0)mining=true;if(e.button===2)placeBlock()});
 renderer?.domElement?.addEventListener("mouseup",e=>{if(e.button===0){mining=false;miningTarget=null;miningProgress=0}});renderer?.domElement?.addEventListener("contextmenu",e=>e.preventDefault())}
