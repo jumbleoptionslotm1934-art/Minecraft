@@ -56,6 +56,13 @@ let scene,camera,renderer,clock,world,player,keys={},selected=0,paused=true,inve
 let materials={},chunkMeshes=new Map(),chunks=new Map(),dirty=new Set(),modified=new Map(),seed=133742;
 let worldTime=0, weather="clear", weatherTimer=0;
 let inventory=Array.from({length:36},()=>null), mining=false, miningTarget=null, miningProgress=0;
+let mobs=new Map(), mobId=1, spawnTimer=0;
+const MOB_TYPES={
+ cow:{name:"Cow",health:10,speed:1.5,damage:0,color:"#8b5a3c",passive:true,drop:20},
+ sheep:{name:"Sheep",health:8,speed:1.7,damage:0,color:"#eeeeee",passive:true,drop:19},
+ zombie:{name:"Zombie",health:20,speed:2.0,damage:3,color:"#4f8f52",passive:false,drop:10},
+ spider:{name:"Spider",health:16,speed:2.8,damage:2,color:"#302b31",passive:false,drop:10}
+};
 const saved=localStorage.getItem("voxel-seed"); if(saved) seed=+saved;
 
 function hash(x,z){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^Math.imul(seed,1442695041);n=(n^(n>>>13))*1274126177;return ((n^(n>>>16))>>>0)/4294967295}
@@ -160,6 +167,62 @@ function buildChunk(cx,cz){
  if(!pos.length)return;
  const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));g.setAttribute("normal",new THREE.Float32BufferAttribute(norm,3));g.setAttribute("color",new THREE.Float32BufferAttribute(col,3));g.setIndex(ind);g.computeBoundingSphere();
  const m=new THREE.Mesh(g,materials.voxel);m.frustumCulled=true;chunkMeshes.set(key(cx,cz),m);scene.add(m);
+}
+
+function mobMaterial(type){return new THREE.MeshLambertMaterial({color:MOB_TYPES[type].color,flatShading:true})}
+function spawnMob(type,x,z){
+ const y=terrainHeight(Math.floor(x),Math.floor(z))+1;
+ const def=MOB_TYPES[type],g=new THREE.BoxGeometry(.8,1.4,.8),m=new THREE.Mesh(g,mobMaterial(type));
+ m.position.set(x,y+.7,z);m.castShadow=true;scene.add(m);
+ const mob={id:mobId++,type,pos:m.position,mesh:m,health:def.health,attackCooldown:0,wander:Math.random()*6.28};
+ mobs.set(mob.id,mob);return mob;
+}
+function removeMob(mob){scene.remove(mob.mesh);mob.mesh.geometry.dispose();mobs.delete(mob.id)}
+function validSpawn(x,z,type){
+ const b=biomeAt(Math.floor(x),Math.floor(z));
+ if(type==="cow"||type==="sheep")return b!=="desert"&&b!=="snow";
+ return b!=="snow";
+}
+function updateMobs(dt){
+ for(const mob of mobs.values()){
+  const def=MOB_TYPES[mob.type],dx=player.pos.x-mob.pos.x,dz=player.pos.z-mob.pos.z,dist=Math.hypot(dx,dz);
+  mob.attackCooldown=Math.max(0,mob.attackCooldown-dt);
+  const hostile=!def.passive&&dist<12;
+  if(hostile){
+   const len=Math.max(.001,dist);mob.pos.x+=dx/len*def.speed*dt;mob.pos.z+=dz/len*def.speed*dt;
+   mob.pos.y=terrainHeight(Math.floor(mob.pos.x),Math.floor(mob.pos.z))+1;
+   if(dist<1.5&&mob.attackCooldown<=0){player.damage(def.damage, mob.type);mob.attackCooldown=1.2}
+  }else{
+   mob.wander+=dt*(Math.random()>.97?3:0);
+   mob.pos.x+=Math.cos(mob.wander)*def.speed*.18*dt;mob.pos.z+=Math.sin(mob.wander)*def.speed*.18*dt;
+   mob.pos.y=terrainHeight(Math.floor(mob.pos.x),Math.floor(mob.pos.z))+1;
+  }
+  mob.mesh.position.copy(mob.pos);mob.mesh.rotation.y=Math.atan2(dx,dz);
+  if(dist>55)removeMob(mob);
+ }
+ spawnTimer-=dt;
+ if(spawnTimer<=0){
+  spawnTimer=4;
+  const count=mobs.size;if(count<18){
+   for(let i=0;i<2&&mobs.size<18;i++){
+    const a=Math.random()*Math.PI*2,d=18+Math.random()*18,x=player.pos.x+Math.cos(a)*d,z=player.pos.z+Math.sin(a)*d;
+    const night=worldTime>600;
+    const type=night?(Math.random()<.55?"zombie":"spider"):(Math.random()<.55?"cow":"sheep");
+    if(validSpawn(x,z,type))spawnMob(type,x,z);
+   }
+  }
+ }
+}
+function attackMob(){
+ const o=camera.getWorldPosition(new THREE.Vector3()),d=camera.getWorldDirection(new THREE.Vector3());
+ let best=null,bestDist=4;
+ for(const mob of mobs.values()){const to=mob.pos.clone().sub(o),dist=to.length();if(dist>bestDist)continue;to.normalize();if(d.dot(to)>.92){best=mob;bestDist=dist}}
+ if(!best)return;
+ const item=inventory[selected],tool=ITEMS[item?.id],damage=tool?.tool==="sword"?5+(tool.tier||1)*2:1;
+ best.health-=damage;
+ if(item&&tool?.durability){item.durability--;if(item.durability<=0)inventory[selected]=null}
+ if(best.health<=0){if(best.type==="cow"||best.type==="sheep")addItem(20,1);else addItem(best.type==="zombie"?10:18,1);removeMob(best)}
+ renderHotbar();renderInventory();saveWorld();
 }
 function markDirty(cx,cz){dirty.add(key(cx,cz))}
 function rebuildDirty(){for(const k of dirty){const [x,z]=k.split(",").map(Number);buildChunk(x,z)}dirty.clear()}
@@ -292,16 +355,16 @@ function init(){
  renderHotbar();renderInventory();ensureWorld();rebuildDirty();
  clock=new THREE.Clock();animate();
 }
-function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();updateMining(dt);updateEnvironment(dt);rebuildDirty();if(Math.random()<dt*.02)saveWorld()}const biome=biomeAt(Math.floor(player.pos.x),Math.floor(player.pos.z));
+function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();updateMining(dt);updateMobs(dt);updateEnvironment(dt);rebuildDirty();if(Math.random()<dt*.02)saveWorld()}const biome=biomeAt(Math.floor(player.pos.x),Math.floor(player.pos.z));
  document.getElementById("status").textContent='❤ '+Math.ceil(player.health)+' / '+player.maxHealth+' · Food '+Math.ceil(player.hunger)+' / '+player.maxHunger+' · '+weather+' · Seed '+seed+' · '+Math.floor(player.pos.x)+', '+Math.floor(player.pos.y)+', '+Math.floor(player.pos.z)+' · '+biome+' · '+(player.onGround?"Grounded":"Airborne");renderer.render(scene,camera)}
 function start(){paused=false;document.getElementById("menu").classList.add("hidden");renderer.domElement.requestPointerLock()}
 function toggleInventory(){inventoryOpen=!inventoryOpen;document.getElementById("inventory").classList.toggle("hidden",!inventoryOpen);if(inventoryOpen)document.exitPointerLock();else renderer.domElement.requestPointerLock()}
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 addEventListener("keydown",e=>{keys[e.code]=true;if(e.code.startsWith("Digit")){const n=+e.code.slice(5)-1;if(n>=0&&n<9){selected=n;window.__selectedSlot=n;renderHotbar()}}if(e.code==="KeyE"&&!e.repeat)toggleInventory();if(e.code==="Escape"){inventoryOpen=false;document.getElementById("inventory").classList.add("hidden");paused=true;document.getElementById("menu").classList.remove("hidden")}})
 addEventListener("keyup",e=>keys[e.code]=false);
-function rendererPointer(){document.addEventListener("mousemove",e=>{if(document.pointerLockElement!==renderer.domElement||inventoryOpen)return;player.yaw-=e.movementX*.0022;player.pitch-=e.movementY*.0022;player.pitch=Math.max(-1.5,Math.min(1.5,player.pitch))});renderer?.domElement?.addEventListener("mousedown",e=>{if(paused)return;if(e.button===0)mining=true;if(e.button===2)placeBlock()});
+function rendererPointer(){document.addEventListener("mousemove",e=>{if(document.pointerLockElement!==renderer.domElement||inventoryOpen)return;player.yaw-=e.movementX*.0022;player.pitch-=e.movementY*.0022;player.pitch=Math.max(-1.5,Math.min(1.5,player.pitch))});renderer?.domElement?.addEventListener("mousedown",e=>{if(paused)return;if(e.button===0){mining=true;attackMob();}if(e.button===2)placeBlock()});
 renderer?.domElement?.addEventListener("mouseup",e=>{if(e.button===0){mining=false;miningTarget=null;miningProgress=0}});renderer?.domElement?.addEventListener("contextmenu",e=>e.preventDefault())}
 document.getElementById("play").onclick=start;
-document.getElementById("newWorld").onclick=()=>{seed=Math.floor(Math.random()*2**31);localStorage.removeItem("voxel-player");localStorage.removeItem("voxel-modified");localStorage.removeItem("voxel-inventory");location.reload()};
+document.getElementById("newWorld").onclick=()=>{for(const m of mobs.values())removeMob(m);seed=Math.floor(Math.random()*2**31);localStorage.removeItem("voxel-player");localStorage.removeItem("voxel-modified");localStorage.removeItem("voxel-inventory");location.reload()};
 init();
 rendererPointer();
