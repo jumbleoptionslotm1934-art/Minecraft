@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voxel Sandbox</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="game"></div>
+<div id="crosshair">+</div>
+<div id="hud">
+  <div id="status"></div>
+  <div id="hotbar"></div>
+  <div id="hint">Click to play · WASD move · Space jump · Shift sprint · LMB mine · RMB place · 1–9 select · E inventory</div>
+</div>
+<div id="inventory" class="hidden">
+  <div class="panel">
+    <h2>Inventory</h2>
+    <div id="inventoryGrid"></div>
+    <p>Press E or Esc to close</p>
+  </div>
+</div>
+<div id="menu">
+  <div class="menu-card">
+    <h1>VOXEL SANDBOX</h1>
+    <p>Original procedural voxel survival prototype</p>
+    <button id="play">Play</button>
+    <button id="newWorld">New World</button>
+    <small>Phase 1: terrain · chunks · camera · mining · building · hotbar · persistence</small>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
