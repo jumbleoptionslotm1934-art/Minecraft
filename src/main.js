@@ -177,7 +177,8 @@ function init(){
  renderer=new THREE.WebGLRenderer({antialias:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;document.getElementById("game").appendChild(renderer.domElement);
  const amb=new THREE.HemisphereLight("#dceeff","#4c6b45",1.8);scene.add(amb);const sun=new THREE.DirectionalLight("#fff3d1",2.2);sun.position.set(80,120,40);sun.castShadow=true;scene.add(sun);
  materials.voxel=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
- player=new Player();world={};player.spawn();loadWorld();
+ player=new Player();world={};loadWorld();
+ if(!localStorage.getItem("voxel-player"))player.spawn();
  renderHotbar();renderInventory();ensureWorld();rebuildDirty();
  clock=new THREE.Clock();animate();
 }
