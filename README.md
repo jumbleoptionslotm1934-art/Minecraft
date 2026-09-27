@@ -33,6 +33,12 @@ Phase 1 core and a substantial Phase 2 world-generation layer are now implemente
 - day/night lighting cycle
 - dynamic weather state with rain conditions
 - persistent survival state
+- passive animals and hostile creatures
+- distance-based mob spawning
+- basic mob wandering and hostile pursuit AI
+- mob health and melee attacks
+- sword-based combat and tool durability
+- mob drops and collection
 
 This repository starts with an incremental architecture:
 
