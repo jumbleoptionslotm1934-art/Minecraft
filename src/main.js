@@ -1,6 +1,6 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
 
-const CFG={CHUNK:16,HEIGHT:64,VIEW:5,SEA:22,GRAVITY:28,JUMP:9.5,WALK:5.2,SPRINT:7.5};
+const CFG={CHUNK:16,HEIGHT:80,VIEW:5,SEA:26,GRAVITY:28,JUMP:9.5,WALK:5.2,SPRINT:7.5};
 const BLOCKS={
   0:{name:"Air",solid:false},
   1:{name:"Grass",solid:true,color:"#62a83f",top:"#78bf4a",bottom:"#74502e"},
@@ -11,7 +11,13 @@ const BLOCKS={
   6:{name:"Leaves",solid:true,color:"#397b38",transparent:true},
   7:{name:"Planks",solid:true,color:"#b18452"},
   8:{name:"Glass",solid:true,color:"#a7d7dc",transparent:true},
-  9:{name:"Glowstone",solid:true,color:"#e3c35b",light:12}
+  9:{name:"Glowstone",solid:true,color:"#e3c35b",light:12},
+  10:{name:"Coal Ore",solid:true,color:"#424242"},
+  11:{name:"Iron Ore",solid:true,color:"#9a8878"},
+  12:{name:"Copper Ore",solid:true,color:"#a86f52"},
+  13:{name:"Gold Ore",solid:true,color:"#d9b62d"},
+  14:{name:"Crystal Ore",solid:true,color:"#5cc7e8"},
+  15:{name:"Water",solid:false,color:"#3d9bd1",transparent:true}
 };
 const HOT=[1,2,3,4,5,7,6,8,9];
 let scene,camera,renderer,clock,world,player,keys={},selected=0,paused=true,inventoryOpen=false;
@@ -22,6 +28,36 @@ function hash(x,z){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^Math.imul
 function smooth(t){return t*t*(3-2*t)}
 function noise(x,z){const x0=Math.floor(x),z0=Math.floor(z),fx=smooth(x-x0),fz=smooth(z-z0);const a=hash(x0,z0),b=hash(x0+1,z0),c=hash(x0,z0+1),d=hash(x0+1,z0+1);return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a,b,fx),THREE.MathUtils.lerp(c,d,fx),fz)}
 function fbm(x,z){let v=0,a=.5,f=.025;for(let i=0;i<5;i++){v+=noise(x*f,z*f)*a;a*=.5;f*=2}return v}
+function biomeAt(x,z){
+ const temp=fbm(x+1200,z-800), wet=fbm(x-700,z+1600), elev=fbm(x+2500,z+2500);
+ if(elev>.72)return "mountains";
+ if(temp<.28)return wet>.52?"snowy_forest":"snow";
+ if(wet<.24)return "desert";
+ if(wet>.78&&temp>.55)return "swamp";
+ if(wet>.62)return "forest";
+ return temp>.62?"plains":"hills";
+}
+function caveNoise(x,y,z){
+ const a=fbm3(x*.075,y*.075,z*.075),b=fbm3((x+317)*.14,(y-91)*.14,(z+503)*.14);
+ return a*.65+b*.35;
+}
+function hash3(x,y,z){let n=Math.imul(x|0,374761393)^Math.imul(y|0,668265263)^Math.imul(z|0,1442695041)^seed;n=(n^(n>>>13))*1274126177;return ((n^(n>>>16))>>>0)/4294967295}
+function noise3(x,y,z){
+ const x0=Math.floor(x),y0=Math.floor(y),z0=Math.floor(z),fx=smooth(x-x0),fy=smooth(y-y0),fz=smooth(z-z0);
+ let v=0;
+ for(let dx=0;dx<2;dx++)for(let dy=0;dy<2;dy++)for(let dz=0;dz<2;dz++)v+=hash3(x0+dx,y0+dy,z0+dz)*(dx?fx:1-fx)*(dy?fy:1-fy)*(dz?fz:1-fz);
+ return v;
+}
+function fbm3(x,y,z){let v=0,a=.5,f=1;for(let i=0;i<4;i++){v+=noise3(x*f,y*f,z*f)*a;a*=.5;f*=2}return v}
+function terrainHeight(wx,wz){
+ const biome=biomeAt(wx,wz),base=fbm(wx,wz),detail=fbm(wx+900,wz-500);
+ let h=20+base*27+detail*8;
+ if(biome==="mountains")h+=18*fbm(wx*.45,wz*.45);
+ if(biome==="desert")h-=3;
+ if(biome==="swamp")h-=5;
+ return Math.max(3,Math.min(CFG.HEIGHT-6,Math.floor(h)));
+}
+function topBlockFor(biome,h){if(h<=CFG.SEA+1)return 4;if(biome==="desert")return 4;if(biome==="snow"||biome==="snowy_forest")return 3;return 1}
 function key(cx,cz){return cx+","+cz}
 function chunkFor(x,z){return [Math.floor(x/CFG.CHUNK),Math.floor(z/CFG.CHUNK)]}
 function local(x){return ((x%CFG.CHUNK)+CFG.CHUNK)%CFG.CHUNK}
@@ -30,18 +66,35 @@ function idx(x,y,z){return x+CFG.CHUNK*(z+CFG.CHUNK*y)}
 class Chunk{
  constructor(cx,cz){this.cx=cx;this.cz=cz;this.blocks=new Uint8Array(CFG.CHUNK*CFG.HEIGHT*CFG.CHUNK);this.generate()}
  generate(){
-  for(let x=0;x<CFG.CHUNK;x++for(let z=0;z<CFG.CHUNK;z++){
-   const wx=this.cx*CFG.CHUNK+x,wz=this.cz*CFG.CHUNK+z;
-   const continental=fbm(wx,wz);
-   const detail=fbm(wx+900,wz-500);
-   const h=Math.max(2,Math.min(CFG.HEIGHT-5,Math.floor(18+continental*25+detail*7)));
-   for(let y=0;y<=h;y++){let id=y===h?(h<CFG.SEA?4:1):y>h-4?2:3;this.blocks[idx(x,y,z)]=id}
-   if(h>=CFG.SEA){for(let y=h+1;y<=CFG.SEA;y++)this.blocks[idx(x,y,z)]=0}
-   if(h>CFG.SEA+1 && hash(wx+91,wz-17)>.91)this.tree(x,h+1,z);
+  for(let x=0;x<CFG.CHUNK;x++)for(let z=0;z<CFG.CHUNK;z++){
+   const wx=this.cx*CFG.CHUNK+x,wz=this.cz*CFG.CHUNK+z,biome=biomeAt(wx,wz),h=terrainHeight(wx,wz);
+   for(let y=0;y<=h;y++){
+    let id=y===h?topBlockFor(biome,h):y>h-4?2:3;
+    if(y>4&&y<h-4){
+      const n=caveNoise(wx,y,wz);
+      if(n>.73 && y<Math.min(h-3,CFG.SEA-1))id=0;
+      else if(n>.70 && y<h-8)id=0;
+    }
+    if(id===3){
+      const r=hash3(wx,y,wz);
+      if(y<18&&r>.987)id=14;
+      else if(y<30&&r>.975)id=13;
+      else if(y<42&&r>.965)id=11;
+      else if(y<50&&r>.95)id=10;
+      else if(y<38&&r>.975)id=12;
+    }
+    this.blocks[idx(x,y,z)]=id;
+   }
+   if(h<CFG.SEA)for(let y=h+1;y<=CFG.SEA;y++)this.blocks[idx(x,y,z)]=15;
+   if(h>CFG.SEA+1&&hash(wx+91,wz-17)>.90)this.tree(x,h+1,z,biome);
+   if(biome==="desert"&&hash(wx+44,wz+12)>.94&&h>CFG.SEA)this.cactus(x,h+1,z);
+   if((biome==="forest"||biome==="plains"||biome==="hills")&&hash(wx-19,wz+72)>.93&&h>CFG.SEA)this.flower(x,h+1,z);
   }
   for(const [k,id] of modified){const [x,y,z]=k.split(",").map(Number);if(Math.floor(x/CFG.CHUNK)===this.cx&&Math.floor(z/CFG.CHUNK)===this.cz)this.set(local(x),y,local(z),id)}
  }
- tree(x,y,z){for(let i=0;i<4&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=5;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=2;dy<=4;dy++){if(Math.abs(dx)+Math.abs(dz)+dy>7)continue;let xx=x+dx,zz=z+dz,yy=y+dy;if(xx>=0&&xx<CFG.CHUNK&&zz>=0&&zz<CFG.CHUNK&&yy<CFG.HEIGHT)this.blocks[idx(xx,yy,zz)]=6}}
+ tree(x,y,z,biome){const trunk=biome==="snowy_forest"?5:5;for(let i=0;i<5&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=trunk;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=2;dy<=5;dy++){if(Math.abs(dx)+Math.abs(dz)+dy>8)continue;let xx=x+dx,zz=z+dz,yy=y+dy;if(xx>=0&&xx<CFG.CHUNK&&zz>=0&&zz<CFG.CHUNK&&yy<CFG.HEIGHT)this.blocks[idx(xx,yy,zz)]=6}}
+ cactus(x,y,z){for(let i=0;i<3&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=5}
+ flower(x,y,z){if(y<CFG.HEIGHT)this.blocks[idx(x,y,z)]=7}
  get(x,y,z){return x<0||z<0||x>=CFG.CHUNK||z>=CFG.CHUNK||y<0||y>=CFG.HEIGHT?0:this.blocks[idx(x,y,z)]}
  set(x,y,z,id){if(x>=0&&z>=0&&x<CFG.CHUNK&&z<CFG.CHUNK&&y>=0&&y<CFG.HEIGHT)this.blocks[idx(x,y,z)]=id}
 }
@@ -122,11 +175,13 @@ function init(){
  renderer=new THREE.WebGLRenderer({antialias:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;document.getElementById("game").appendChild(renderer.domElement);
  const amb=new THREE.HemisphereLight("#dceeff","#4c6b45",1.8);scene.add(amb);const sun=new THREE.DirectionalLight("#fff3d1",2.2);sun.position.set(80,120,40);sun.castShadow=true;scene.add(sun);
  materials.voxel=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+ materials.voxel.transparent=true;materials.voxel.opacity=.92;
  player=new Player();world={};player.spawn();loadWorld();
  renderHotbar();renderInventory();ensureWorld();rebuildDirty();
  clock=new THREE.Clock();animate();
 }
-function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();rebuildDirty()}document.getElementById("status").textContent='Seed '+seed+' · '+Math.floor(player.pos.x)+', '+Math.floor(player.pos.y)+', '+Math.floor(player.pos.z)+' · '+(player.onGround?"Grounded":"Airborne");renderer.render(scene,camera)}
+function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();rebuildDirty()}const biome=biomeAt(Math.floor(player.pos.x),Math.floor(player.pos.z));
+ document.getElementById("status").textContent='Seed '+seed+' · '+Math.floor(player.pos.x)+', '+Math.floor(player.pos.y)+', '+Math.floor(player.pos.z)+' · '+biome+' · '+(player.onGround?"Grounded":"Airborne");renderer.render(scene,camera)}
 function start(){paused=false;document.getElementById("menu").classList.add("hidden");renderer.domElement.requestPointerLock()}
 function toggleInventory(){inventoryOpen=!inventoryOpen;document.getElementById("inventory").classList.toggle("hidden",!inventoryOpen);if(inventoryOpen)document.exitPointerLock();else renderer.domElement.requestPointerLock()}
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
