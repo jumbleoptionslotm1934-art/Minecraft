@@ -18,6 +18,14 @@ Phase 1 core and a substantial Phase 2 world-generation layer are now implemente
 - trees, cactus and flowers
 - sea-level water generation
 - chunk streaming and exposed-face meshing
+- item registry and stack-based inventory
+- persistent hotbar/inventory state
+- resource drops from mined blocks
+- tool tiers and durability
+- progressive hold-to-mine interaction
+- recipe-driven crafting
+- crafting UI
+- starter survival inventory
 
 This repository starts with an incremental architecture:
 
