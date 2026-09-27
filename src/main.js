@@ -17,7 +17,9 @@ const BLOCKS={
   12:{name:"Copper Ore",solid:true,color:"#a86f52"},
   13:{name:"Gold Ore",solid:true,color:"#d9b62d"},
   14:{name:"Crystal Ore",solid:true,color:"#5cc7e8"},
-  15:{name:"Water",solid:false,color:"#3d9bd1",transparent:true}
+  15:{name:"Water",solid:false,color:"#3d9bd1",transparent:true},
+  16:{name:"Cactus",solid:true,color:"#3d8b45"},
+  17:{name:"Wildflower",solid:true,color:"#d96aa9" }
 };
 const HOT=[1,2,3,4,5,7,6,8,9];
 let scene,camera,renderer,clock,world,player,keys={},selected=0,paused=true,inventoryOpen=false;
@@ -93,8 +95,8 @@ class Chunk{
   for(const [k,id] of modified){const [x,y,z]=k.split(",").map(Number);if(Math.floor(x/CFG.CHUNK)===this.cx&&Math.floor(z/CFG.CHUNK)===this.cz)this.set(local(x),y,local(z),id)}
  }
  tree(x,y,z,biome){const trunk=biome==="snowy_forest"?5:5;for(let i=0;i<5&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=trunk;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=2;dy<=5;dy++){if(Math.abs(dx)+Math.abs(dz)+dy>8)continue;let xx=x+dx,zz=z+dz,yy=y+dy;if(xx>=0&&xx<CFG.CHUNK&&zz>=0&&zz<CFG.CHUNK&&yy<CFG.HEIGHT)this.blocks[idx(xx,yy,zz)]=6}}
- cactus(x,y,z){for(let i=0;i<3&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=5}
- flower(x,y,z){if(y<CFG.HEIGHT)this.blocks[idx(x,y,z)]=7}
+ cactus(x,y,z){for(let i=0;i<3&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=16}
+ flower(x,y,z){if(y<CFG.HEIGHT)this.blocks[idx(x,y,z)]=17}
  get(x,y,z){return x<0||z<0||x>=CFG.CHUNK||z>=CFG.CHUNK||y<0||y>=CFG.HEIGHT?0:this.blocks[idx(x,y,z)]}
  set(x,y,z,id){if(x>=0&&z>=0&&x<CFG.CHUNK&&z<CFG.CHUNK&&y>=0&&y<CFG.HEIGHT)this.blocks[idx(x,y,z)]=id}
 }
@@ -115,7 +117,7 @@ function colorFor(id,face){const b=BLOCKS[id];return new THREE.Color(face===2&&b
 function buildChunk(cx,cz){
  const c=getChunk(cx,cz), pos=[],norm=[],col=[],ind=[];let v=0;
  for(let x=0;x<CFG.CHUNK;x++)for(let y=0;y<CFG.HEIGHT;y++)for(let z=0;z<CFG.CHUNK;z++){
-  const id=c.get(x,y,z);if(!id||!BLOCKS[id].solid)continue;
+  const id=c.get(x,y,z);if(!id||(!BLOCKS[id].solid&&id!==15))continue;
   for(let f=0;f<6;f++){const [d,vs]=FACE[f];if(getBlock(cx*CFG.CHUNK+x+d[0],y+d[1],cz*CFG.CHUNK+z+d[2])!==0)continue;
    const base=[cx*CFG.CHUNK+x,y,cz*CFG.CHUNK+z];const arr=[];for(let i=0;i<4;i++){arr.push([base[0]+vs[i*3],base[1]+vs[i*3+1],base[2]+vs[i*3+2]])}
    for(const p of arr){pos.push(...p);norm.push(d[0],d[1],d[2]);const cc=colorFor(id,f);col.push(cc.r,cc.g,cc.b)}
@@ -175,7 +177,6 @@ function init(){
  renderer=new THREE.WebGLRenderer({antialias:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;document.getElementById("game").appendChild(renderer.domElement);
  const amb=new THREE.HemisphereLight("#dceeff","#4c6b45",1.8);scene.add(amb);const sun=new THREE.DirectionalLight("#fff3d1",2.2);sun.position.set(80,120,40);sun.castShadow=true;scene.add(sun);
  materials.voxel=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
- materials.voxel.transparent=true;materials.voxel.opacity=.92;
  player=new Player();world={};player.spawn();loadWorld();
  renderHotbar();renderInventory();ensureWorld();rebuildDirty();
  clock=new THREE.Clock();animate();
