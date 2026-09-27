@@ -3,7 +3,23 @@
 An original voxel sandbox game inspired by the core systems of Minecraft.
 
 ## Current scope
-This repository starts with an incremental Phase 1 architecture:
+
+### Implemented
+Phase 1 core and a substantial Phase 2 world-generation layer are now implemented in the browser prototype:
+- deterministic seeded chunks
+- first-person movement and collision
+- block placement/destruction
+- hotbar/inventory UI foundation
+- persistent player position and modified blocks
+- biome classification
+- varied terrain heights
+- caves
+- ore generation
+- trees, cactus and flowers
+- sea-level water generation
+- chunk streaming and exposed-face meshing
+
+This repository starts with an incremental architecture:
 
 - First-person voxel camera
 - Procedural chunked terrain
