@@ -26,6 +26,13 @@ Phase 1 core and a substantial Phase 2 world-generation layer are now implemente
 - recipe-driven crafting
 - crafting UI
 - starter survival inventory
+- health and hunger systems
+- food consumption and regeneration
+- starvation and drowning damage
+- accumulated fall damage
+- day/night lighting cycle
+- dynamic weather state with rain conditions
+- persistent survival state
 
 This repository starts with an incremental architecture:
 
