@@ -1,0 +1,138 @@
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
+
+const CFG={CHUNK:16,HEIGHT:64,VIEW:5,SEA:22,GRAVITY:28,JUMP:9.5,WALK:5.2,SPRINT:7.5};
+const BLOCKS={
+  0:{name:"Air",solid:false},
+  1:{name:"Grass",solid:true,color:"#62a83f",top:"#78bf4a",bottom:"#74502e"},
+  2:{name:"Dirt",solid:true,color:"#79502f"},
+  3:{name:"Stone",solid:true,color:"#808080"},
+  4:{name:"Sand",solid:true,color:"#d6c27a"},
+  5:{name:"Wood",solid:true,color:"#77512f"},
+  6:{name:"Leaves",solid:true,color:"#397b38",transparent:true},
+  7:{name:"Planks",solid:true,color:"#b18452"},
+  8:{name:"Glass",solid:true,color:"#a7d7dc",transparent:true},
+  9:{name:"Glowstone",solid:true,color:"#e3c35b",light:12}
+};
+const HOT=[1,2,3,4,5,7,6,8,9];
+let scene,camera,renderer,clock,world,player,keys={},selected=0,paused=true,inventoryOpen=false;
+let materials={},chunkMeshes=new Map(),chunks=new Map(),dirty=new Set(),seed=133742;
+const saved=localStorage.getItem("voxel-seed"); if(saved) seed=+saved;
+
+function hash(x,z){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^Math.imul(seed,1442695041);n=(n^(n>>>13))*1274126177;return ((n^(n>>>16))>>>0)/4294967295}
+function smooth(t){return t*t*(3-2*t)}
+function noise(x,z){const x0=Math.floor(x),z0=Math.floor(z),fx=smooth(x-x0),fz=smooth(z-z0);const a=hash(x0,z0),b=hash(x0+1,z0),c=hash(x0,z0+1),d=hash(x0+1,z0+1);return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a,b,fx),THREE.MathUtils.lerp(c,d,fx),fz)}
+function fbm(x,z){let v=0,a=.5,f=.025;for(let i=0;i<5;i++){v+=noise(x*f,z*f)*a;a*=.5;f*=2}return v}
+function key(cx,cz){return cx+","+cz}
+function chunkFor(x,z){return [Math.floor(x/CFG.CHUNK),Math.floor(z/CFG.CHUNK)]}
+function local(x){return ((x%CFG.CHUNK)+CFG.CHUNK)%CFG.CHUNK}
+function idx(x,y,z){return x+CFG.CHUNK*(z+CFG.CHUNK*y)}
+
+class Chunk{
+ constructor(cx,cz){this.cx=cx;this.cz=cz;this.blocks=new Uint8Array(CFG.CHUNK*CFG.HEIGHT*CFG.CHUNK);this.generate()}
+ generate(){
+  for(let x=0;x<CFG.CHUNK;x++)for(let z=0;z<CFG.CHUNK;z++){
+   const wx=this.cx*CFG.CHUNK+x,wz=this.cz*CFG.CHUNK+z;
+   const continental=fbm(wx,wz);
+   const detail=fbm(wx+900,wz-500);
+   const h=Math.max(2,Math.min(CFG.HEIGHT-5,Math.floor(18+continental*25+detail*7)));
+   for(let y=0;y<=h;y++){let id=y===h?(h<CFG.SEA?4:1):y>h-4?2:3;this.blocks[idx(x,y,z)]=id}
+   if(h>=CFG.SEA){for(let y=h+1;y<=CFG.SEA;y++)this.blocks[idx(x,y,z)]=0}
+   if(h>CFG.SEA+1 && hash(wx+91,wz-17)>.91)this.tree(x,h+1,z);
+  }
+ }
+ tree(x,y,z){for(let i=0;i<4&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=5;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=2;dy<=4;dy++){if(Math.abs(dx)+Math.abs(dz)+dy>7)continue;let xx=x+dx,zz=z+dz,yy=y+dy;if(xx>=0&&xx<CFG.CHUNK&&zz>=0&&zz<CFG.CHUNK&&yy<CFG.HEIGHT)this.blocks[idx(xx,yy,zz)]=6}}
+ get(x,y,z){return x<0||z<0||x>=CFG.CHUNK||z>=CFG.CHUNK||y<0||y>=CFG.HEIGHT?0:this.blocks[idx(x,y,z)]}
+ set(x,y,z,id){if(x>=0&&z>=0&&x<CFG.CHUNK&&z<CFG.CHUNK&&y>=0&&y<CFG.HEIGHT)this.blocks[idx(x,y,z)]=id}
+}
+
+function getChunk(cx,cz){const k=key(cx,cz);if(!chunks.has(k))chunks.set(k,new Chunk(cx,cz));return chunks.get(k)}
+function getBlock(x,y,z){if(y<0||y>=CFG.HEIGHT)return 0;const [cx,cz]=chunkFor(x,z);return getChunk(cx,cz).get(local(x),y,local(z))}
+function setBlock(x,y,z,id){if(y<0||y>=CFG.HEIGHT)return;const [cx,cz]=chunkFor(x,z);getChunk(cx,cz).set(local(x),y,local(z),id);markDirty(cx,cz);if(local(x)===0)markDirty(cx-1,cz);if(local(x)===15)markDirty(cx+1,cz);if(local(z)===0)markDirty(cx,cz-1);if(local(z)===15)markDirty(cx,cz+1)}
+
+const FACE=[
+ [[1,0,0],[1,0,1,1,0,1,1,1,1,0,1,1]],
+ [[-1,0,0],[0,0,0,0,1,0,0,1,1,0,0,1]],
+ [[0,1,0],[0,1,0,1,1,0,1,1,1,0,1,1]],
+ [[0,-1,0],[0,0,0,1,0,0,1,0,1,0,0,1]],
+ [[0,0,1],[0,0,1,1,0,1,1,1,1,0,1,1]],
+ [[0,0,-1],[0,0,0,0,1,0,1,1,0,1,0,0]]
+];
+function colorFor(id,face){const b=BLOCKS[id];return new THREE.Color(face===2&&b.top?b.top:face===3&&b.bottom?b.bottom:b.color)}
+function buildChunk(cx,cz){
+ const c=getChunk(cx,cz), pos=[],norm=[],col=[],ind=[];let v=0;
+ for(let x=0;x<CFG.CHUNK;x++)for(let y=0;y<CFG.HEIGHT;y++)for(let z=0;z<CFG.CHUNK;z++){
+  const id=c.get(x,y,z);if(!id||!BLOCKS[id].solid)continue;
+  for(let f=0;f<6;f++){const [d,vs]=FACE[f];if(getBlock(cx*CFG.CHUNK+x+d[0],y+d[1],cz*CFG.CHUNK+z+d[2])!==0)continue;
+   const base=[cx*CFG.CHUNK+x,y,cz*CFG.CHUNK+z];const arr=[];for(let i=0;i<4;i++){arr.push([base[0]+vs[i*3],base[1]+vs[i*3+1],base[2]+vs[i*3+2]])}
+   for(const p of arr){pos.push(...p);norm.push(d[0],d[1],d[2]);const cc=colorFor(id,f);col.push(cc.r,cc.g,cc.b)}
+   ind.push(v,v+1,v+2,v,v+2,v+3);v+=4;
+  }
+ }
+ if(chunkMeshes.has(key(cx,cz)))scene.remove(chunkMeshes.get(key(cx,cz)));
+ if(!pos.length)return;
+ const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));g.setAttribute("normal",new THREE.Float32BufferAttribute(norm,3));g.setAttribute("color",new THREE.Float32BufferAttribute(col,3));g.setIndex(ind);g.computeBoundingSphere();
+ const m=new THREE.Mesh(g,materials.voxel);m.frustumCulled=true;chunkMeshes.set(key(cx,cz),m);scene.add(m);
+}
+function markDirty(cx,cz){dirty.add(key(cx,cz))}
+function rebuildDirty(){for(const k of dirty){const [x,z]=k.split(",").map(Number);buildChunk(x,z)}dirty.clear()}
+
+function ensureWorld(){
+ const [pcx,pcz]=chunkFor(player.pos.x,player.pos.z);
+ for(let dx=-CFG.VIEW;dx<=CFG.VIEW;dx++)for(let dz=-CFG.VIEW;dz<=CFG.VIEW;dz++)if(dx*dx+dz*dz<=CFG.VIEW*CFG.VIEW)getChunk(pcx+dx,pcz+dz);
+ for(const k of chunks.keys())markDirty(...k.split(",").map(Number));
+}
+function streamWorld(){
+ const [pcx,pcz]=chunkFor(player.pos.x,player.pos.z);
+ for(let dx=-CFG.VIEW;dx<=CFG.VIEW;dx++)for(let dz=-CFG.VIEW;dz<=CFG.VIEW;dz++)if(dx*dx+dz*dz<=CFG.VIEW*CFG.VIEW)getChunk(pcx+dx,pcz+dz);
+ const limit=CFG.VIEW+2;for(const [k,m] of chunkMeshes){const [x,z]=k.split(",").map(Number);if(Math.abs(x-pcx)>limit||Math.abs(z-pcz)>limit){scene.remove(m);m.geometry.dispose();chunkMeshes.delete(k)}}
+}
+
+class Player{
+ constructor(){this.pos=new THREE.Vector3(0,40,0);this.vel=new THREE.Vector3();this.yaw=0;this.pitch=0;this.onGround=false;this.health=20}
+ spawn(){let y=CFG.HEIGHT-1;while(y>1&&getBlock(0,y,0)===0)y--;this.pos.set(.5,y+1.01,.5)}
+ update(dt){
+  const dir=new THREE.Vector3((keys.KeyD?1:0)-(keys.KeyA?1:0),0,(keys.KeyS?1:0)-(keys.KeyW?1:0));if(dir.lengthSq())dir.normalize();
+  const speed=(keys.ShiftLeft||keys.ShiftRight)?CFG.SPRINT:CFG.WALK;dir.applyAxisAngle(new THREE.Vector3(0,1,0),this.yaw);this.vel.x=dir.x*speed;this.vel.z=dir.z*speed;
+  this.vel.y-=CFG.GRAVITY*dt;if(this.onGround&&keys.Space){this.vel.y=CFG.JUMP;this.onGround=false}
+  this.moveAxis("x",this.vel.x*dt);this.moveAxis("z",this.vel.z*dt);this.moveAxis("y",this.vel.y*dt);
+  if(this.pos.y<-10)this.spawn();
+  camera.position.copy(this.pos).add(new THREE.Vector3(0,1.62,0));camera.rotation.order="YXZ";camera.rotation.y=this.yaw;camera.rotation.x=this.pitch;
+ }
+ moveAxis(axis,amount){if(!amount)return;const old=this.pos[axis];this.pos[axis]+=amount;if(collides(this.pos)){this.pos[axis]=old;if(axis==="y"){if(amount<0)this.onGround=true;this.vel.y=0}}else if(axis==="y")this.onGround=false}
+}
+function collides(p){const r=.3,h=1.8;for(const dx of [-r,r])for(const dz of [-r,r])for(const dy of [0,h]){const x=Math.floor(p.x+dx),y=Math.floor(p.y+dy),z=Math.floor(p.z+dz);if(BLOCKS[getBlock(x,y,z)]?.solid)return true}return false}
+
+function raycast(max=7){
+ const o=camera.getWorldPosition(new THREE.Vector3()),d=camera.getWorldDirection(new THREE.Vector3());let p=o.clone();let prev=null;for(let i=0;i<max*20;i++){const b=new THREE.Vector3(Math.floor(p.x),Math.floor(p.y),Math.floor(p.z));const id=getBlock(b.x,b.y,b.z);if(id)return {block:b,previous:prev,id};prev=b;p.addScaledVector(d,.05)}return null;
+}
+function breakBlock(){const hit=raycast();if(!hit)return;if(hit.id===3&&Math.random()<.08){}setBlock(hit.block.x,hit.block.y,hit.block.z,0);saveWorld()}
+function placeBlock(){const hit=raycast();if(!hit||!hit.previous)return;const p=hit.previous;if(collides(new THREE.Vector3(p.x+.5,p.y,p.z+.5)))return;setBlock(p.x,p.y,p.z,HOT[selected]);saveWorld()}
+
+function makeSwatch(color){const c=document.createElement("canvas");c.width=c.height=16;const x=c.getContext("2d");x.fillStyle=color;x.fillRect(0,0,16,16);if(color==="#62a83f"){x.fillStyle="#78bf4a";x.fillRect(0,0,16,5)}return c.toDataURL()}
+function renderHotbar(){const h=document.getElementById("hotbar");h.innerHTML="";HOT.forEach((id,i)=>{const s=document.createElement("div");s.className="slot"+(i===selected?" selected":"");s.innerHTML='<span class="key">'+(i+1)+'</span><img class="swatch" src="'+makeSwatch(BLOCKS[id].color)+'"><span class="count">64</span>';h.appendChild(s)})}
+function renderInventory(){const g=document.getElementById("inventoryGrid");g.className="invgrid";g.innerHTML="";for(let i=0;i<27;i++){const s=document.createElement("div");s.className="invslot";const id=HOT[i%HOT.length];s.innerHTML='<img class="swatch" src="'+makeSwatch(BLOCKS[id].color)+'"><span class="count">64</span>';g.appendChild(s)}}
+
+function saveWorld(){localStorage.setItem("voxel-seed",String(seed));localStorage.setItem("voxel-player",JSON.stringify({x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch}))}
+function loadWorld(){try{const p=JSON.parse(localStorage.getItem("voxel-player"));if(p)Object.assign(player.pos,{x:p.x,y:p.y,z:p.z})}catch{}}
+
+function init(){
+ scene=new THREE.Scene();scene.background=new THREE.Color("#7db9ed");scene.fog=new THREE.Fog("#7db9ed",45,145);
+ camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,250);
+ renderer=new THREE.WebGLRenderer({antialias:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;document.getElementById("game").appendChild(renderer.domElement);
+ const amb=new THREE.HemisphereLight("#dceeff","#4c6b45",1.8);scene.add(amb);const sun=new THREE.DirectionalLight("#fff3d1",2.2);sun.position.set(80,120,40);sun.castShadow=true;scene.add(sun);
+ materials.voxel=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+ player=new Player();world={};player.spawn();loadWorld();
+ renderHotbar();renderInventory();ensureWorld();rebuildDirty();
+ clock=new THREE.Clock();animate();
+}
+function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(!paused&&!inventoryOpen){player.update(dt);streamWorld();rebuildDirty()}document.getElementById("status").textContent='Seed '+seed+' · '+Math.floor(player.pos.x)+', '+Math.floor(player.pos.y)+', '+Math.floor(player.pos.z)+' · '+(player.onGround?"Grounded":"Airborne");renderer.render(scene,camera)}
+function start(){paused=false;document.getElementById("menu").classList.add("hidden");renderer.domElement.requestPointerLock()}
+function toggleInventory(){inventoryOpen=!inventoryOpen;document.getElementById("inventory").classList.toggle("hidden",!inventoryOpen);if(inventoryOpen)document.exitPointerLock();else renderer.domElement.requestPointerLock()}
+addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+addEventListener("keydown",e=>{keys[e.code]=true;if(e.code.startsWith("Digit")){const n=+e.code.slice(5)-1;if(n>=0&&n<9){selected=n;renderHotbar()}}if(e.code==="KeyE"&&!e.repeat)toggleInventory();if(e.code==="Escape"){inventoryOpen=false;document.getElementById("inventory").classList.add("hidden");paused=true;document.getElementById("menu").classList.remove("hidden")}})
+addEventListener("keyup",e=>keys[e.code]=false);
+rendererPointer();
+function rendererPointer(){document.addEventListener("mousemove",e=>{if(document.pointerLockElement!==renderer.domElement||inventoryOpen)return;player.yaw-=e.movementX*.0022;player.pitch-=e.movementY*.0022;player.pitch=Math.max(-1.5,Math.min(1.5,player.pitch))});renderer?.domElement?.addEventListener("mousedown",e=>{if(paused)return;if(e.button===0)breakBlock();if(e.button===2)placeBlock()});renderer?.domElement?.addEventListener("contextmenu",e=>e.preventDefault())}
+document.getElementById("play").onclick=start;
+document.getElementById("newWorld").onclick=()=>{seed=Math.floor(Math.random()*2**31);localStorage.removeItem("voxel-player");location.reload()};
+init();
