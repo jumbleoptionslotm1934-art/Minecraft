@@ -15,7 +15,7 @@ const BLOCKS={
 };
 const HOT=[1,2,3,4,5,7,6,8,9];
 let scene,camera,renderer,clock,world,player,keys={},selected=0,paused=true,inventoryOpen=false;
-let materials={},chunkMeshes=new Map(),chunks=new Map(),dirty=new Set(),seed=133742;
+let materials={},chunkMeshes=new Map(),chunks=new Map(),dirty=new Set(),modified=new Map(),seed=133742;
 const saved=localStorage.getItem("voxel-seed"); if(saved) seed=+saved;
 
 function hash(x,z){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^Math.imul(seed,1442695041);n=(n^(n>>>13))*1274126177;return ((n^(n>>>16))>>>0)/4294967295}
@@ -30,7 +30,7 @@ function idx(x,y,z){return x+CFG.CHUNK*(z+CFG.CHUNK*y)}
 class Chunk{
  constructor(cx,cz){this.cx=cx;this.cz=cz;this.blocks=new Uint8Array(CFG.CHUNK*CFG.HEIGHT*CFG.CHUNK);this.generate()}
  generate(){
-  for(let x=0;x<CFG.CHUNK;x++)for(let z=0;z<CFG.CHUNK;z++){
+  for(let x=0;x<CFG.CHUNK;x++for(let z=0;z<CFG.CHUNK;z++){
    const wx=this.cx*CFG.CHUNK+x,wz=this.cz*CFG.CHUNK+z;
    const continental=fbm(wx,wz);
    const detail=fbm(wx+900,wz-500);
@@ -39,6 +39,7 @@ class Chunk{
    if(h>=CFG.SEA){for(let y=h+1;y<=CFG.SEA;y++)this.blocks[idx(x,y,z)]=0}
    if(h>CFG.SEA+1 && hash(wx+91,wz-17)>.91)this.tree(x,h+1,z);
   }
+  for(const [k,id] of modified){const [x,y,z]=k.split(",").map(Number);if(Math.floor(x/CFG.CHUNK)===this.cx&&Math.floor(z/CFG.CHUNK)===this.cz)this.set(local(x),y,local(z),id)}
  }
  tree(x,y,z){for(let i=0;i<4&&y+i<CFG.HEIGHT;i++)this.blocks[idx(x,y+i,z)]=5;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=2;dy<=4;dy++){if(Math.abs(dx)+Math.abs(dz)+dy>7)continue;let xx=x+dx,zz=z+dz,yy=y+dy;if(xx>=0&&xx<CFG.CHUNK&&zz>=0&&zz<CFG.CHUNK&&yy<CFG.HEIGHT)this.blocks[idx(xx,yy,zz)]=6}}
  get(x,y,z){return x<0||z<0||x>=CFG.CHUNK||z>=CFG.CHUNK||y<0||y>=CFG.HEIGHT?0:this.blocks[idx(x,y,z)]}
@@ -47,7 +48,7 @@ class Chunk{
 
 function getChunk(cx,cz){const k=key(cx,cz);if(!chunks.has(k))chunks.set(k,new Chunk(cx,cz));return chunks.get(k)}
 function getBlock(x,y,z){if(y<0||y>=CFG.HEIGHT)return 0;const [cx,cz]=chunkFor(x,z);return getChunk(cx,cz).get(local(x),y,local(z))}
-function setBlock(x,y,z,id){if(y<0||y>=CFG.HEIGHT)return;const [cx,cz]=chunkFor(x,z);getChunk(cx,cz).set(local(x),y,local(z),id);markDirty(cx,cz);if(local(x)===0)markDirty(cx-1,cz);if(local(x)===15)markDirty(cx+1,cz);if(local(z)===0)markDirty(cx,cz-1);if(local(z)===15)markDirty(cx,cz+1)}
+function setBlock(x,y,z,id){if(y<0||y>=CFG.HEIGHT)return;modified.set(x+","+y+","+z,id);const [cx,cz]=chunkFor(x,z);getChunk(cx,cz).set(local(x),y,local(z),id);markDirty(cx,cz);if(local(x)===0)markDirty(cx-1,cz);if(local(x)===15)markDirty(cx+1,cz);if(local(z)===0)markDirty(cx,cz-1);if(local(z)===15)markDirty(cx,cz+1)}
 
 const FACE=[
  [[1,0,0],[1,0,1,1,0,1,1,1,1,0,1,1]],
@@ -112,8 +113,8 @@ function makeSwatch(color){const c=document.createElement("canvas");c.width=c.he
 function renderHotbar(){const h=document.getElementById("hotbar");h.innerHTML="";HOT.forEach((id,i)=>{const s=document.createElement("div");s.className="slot"+(i===selected?" selected":"");s.innerHTML='<span class="key">'+(i+1)+'</span><img class="swatch" src="'+makeSwatch(BLOCKS[id].color)+'"><span class="count">64</span>';h.appendChild(s)})}
 function renderInventory(){const g=document.getElementById("inventoryGrid");g.className="invgrid";g.innerHTML="";for(let i=0;i<27;i++){const s=document.createElement("div");s.className="invslot";const id=HOT[i%HOT.length];s.innerHTML='<img class="swatch" src="'+makeSwatch(BLOCKS[id].color)+'"><span class="count">64</span>';g.appendChild(s)}}
 
-function saveWorld(){localStorage.setItem("voxel-seed",String(seed));localStorage.setItem("voxel-player",JSON.stringify({x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch}))}
-function loadWorld(){try{const p=JSON.parse(localStorage.getItem("voxel-player"));if(p)Object.assign(player.pos,{x:p.x,y:p.y,z:p.z})}catch{}}
+function saveWorld(){localStorage.setItem("voxel-seed",String(seed));localStorage.setItem("voxel-player",JSON.stringify({x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw,pitch:player.pitch}));localStorage.setItem("voxel-modified",JSON.stringify([...modified]))}
+function loadWorld(){try{const p=JSON.parse(localStorage.getItem("voxel-player"));if(p)Object.assign(player.pos,{x:p.x,y:p.y,z:p.z});const m=JSON.parse(localStorage.getItem("voxel-modified")||"[]");modified=new Map(m)}catch{}}
 
 function init(){
  scene=new THREE.Scene();scene.background=new THREE.Color("#7db9ed");scene.fog=new THREE.Fog("#7db9ed",45,145);
@@ -131,8 +132,8 @@ function toggleInventory(){inventoryOpen=!inventoryOpen;document.getElementById(
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 addEventListener("keydown",e=>{keys[e.code]=true;if(e.code.startsWith("Digit")){const n=+e.code.slice(5)-1;if(n>=0&&n<9){selected=n;renderHotbar()}}if(e.code==="KeyE"&&!e.repeat)toggleInventory();if(e.code==="Escape"){inventoryOpen=false;document.getElementById("inventory").classList.add("hidden");paused=true;document.getElementById("menu").classList.remove("hidden")}})
 addEventListener("keyup",e=>keys[e.code]=false);
-rendererPointer();
 function rendererPointer(){document.addEventListener("mousemove",e=>{if(document.pointerLockElement!==renderer.domElement||inventoryOpen)return;player.yaw-=e.movementX*.0022;player.pitch-=e.movementY*.0022;player.pitch=Math.max(-1.5,Math.min(1.5,player.pitch))});renderer?.domElement?.addEventListener("mousedown",e=>{if(paused)return;if(e.button===0)breakBlock();if(e.button===2)placeBlock()});renderer?.domElement?.addEventListener("contextmenu",e=>e.preventDefault())}
 document.getElementById("play").onclick=start;
 document.getElementById("newWorld").onclick=()=>{seed=Math.floor(Math.random()*2**31);localStorage.removeItem("voxel-player");location.reload()};
 init();
+rendererPointer();
